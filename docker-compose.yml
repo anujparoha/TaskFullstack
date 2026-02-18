@@ -1,0 +1,59 @@
+version: '3.9'
+
+services:
+
+  # ── MongoDB ──────────────────────────────────────────────────────────────────
+  mongo:
+    image: mongo:7
+    container_name: wallet_mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    environment:
+      MONGO_INITDB_DATABASE: wallet_service
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ── Seed Script ──────────────────────────────────────────────────────────────
+  # Runs once, seeds the DB, then exits
+  seed:
+    build: .
+    container_name: wallet_seed
+    depends_on:
+      mongo:
+        condition: service_healthy
+    environment:
+      MONGODB_URI: mongodb://mongo:27017/wallet_service
+    command: ["node", "src/seed.js"]
+    restart: on-failure
+
+  # ── Wallet API ───────────────────────────────────────────────────────────────
+  api:
+    build: .
+    container_name: wallet_api
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+      seed:
+        condition: service_completed_successfully
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: 3000
+      MONGODB_URI: mongodb://mongo:27017/wallet_service
+      NODE_ENV: production
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://localhost:3000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  mongo_data:
